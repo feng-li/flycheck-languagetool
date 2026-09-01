@@ -86,6 +86,35 @@ this also changes the schedule of other Flycheck checkers in those buffers."
   :type 'boolean
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-classify-issue-types t
+  "Whether to show common LanguageTool issue types as Flycheck levels.
+
+Grammar, style, misspelling, typographical, and duplication matches keep the
+same severity and appearance as warnings, but their issue type replaces the
+generic `warning' label.  Other issue types remain warnings."
+  :type 'boolean
+  :group 'flycheck-languagetool)
+
+(defconst flycheck-languagetool--issue-type-levels
+  '(("grammar" . grammar)
+    ("style" . style)
+    ("misspelling" . misspelling)
+    ("typographical" . typographical)
+    ("duplication" . duplication))
+  "LanguageTool issue types displayed as Flycheck error levels.")
+
+(dolist (level (mapcar #'cdr flycheck-languagetool--issue-type-levels))
+  (flycheck-define-error-level level
+    :severity (flycheck-error-level-severity 'warning)
+    :compilation-level (flycheck-error-level-compilation-level 'warning)
+    :overlay-category (flycheck-error-level-overlay-category 'warning)
+    :margin-spec (flycheck-error-level-margin-spec 'warning)
+    :fringe-bitmap
+    (cons (flycheck-error-level-fringe-bitmap 'warning)
+          (flycheck-error-level-fringe-bitmap 'warning t))
+    :fringe-face (flycheck-error-level-fringe-face 'warning)
+    :error-list-face (flycheck-error-level-error-list-face 'warning)))
+
 (defcustom flycheck-languagetool-url nil
   "The URL for the LanguageTool API we should connect to."
   :type '(choice (const :tag "Auto" nil)
@@ -352,6 +381,13 @@ LanguageTool offsets continue to refer to the original buffer positions."
                      (> (match-end 0) beg))))
         found))))
 
+(defun flycheck-languagetool--issue-level (match)
+  "Return the Flycheck level for LanguageTool MATCH."
+  (or (and flycheck-languagetool-classify-issue-types
+           (cdr (assoc (cdr (assoc 'issueType (assoc 'rule match)))
+                       flycheck-languagetool--issue-type-levels)))
+      'warning))
+
 (defun flycheck-languagetool--check-all (results tick)
   "Map RESULTS from LanguageTool to positions of errors in the buffer.
 TICK was the result of `buffer-chars-modified-tick' at the time of the check."
@@ -362,7 +398,7 @@ TICK was the result of `buffer-chars-modified-tick' at the time of the check."
       (let* ((pt-beg (+ (point-min) (cdr (assoc 'offset match))))
              (len (cdr (assoc 'length match)))
              (pt-end (+ pt-beg len))
-             (type 'warning)
+             (type (flycheck-languagetool--issue-level match))
              (id (cdr (assoc 'id (assoc 'rule match))))
              (subid (cdr (assoc 'subId (assoc 'rule match))))
              (replacements (cdr (assoc 'replacements match)))
