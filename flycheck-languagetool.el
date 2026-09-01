@@ -48,6 +48,14 @@
   :type 'list
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-ignore-tex-math t
+  "Whether to ignore LanguageTool matches inside TeX math environments.
+
+This applies in `latex-mode' and modes derived from AUCTeX's `TeX-mode' when
+the `texmathp' library is available."
+  :type 'boolean
+  :group 'flycheck-languagetool)
+
 (defcustom flycheck-languagetool-url nil
   "The URL for the LanguageTool API we should connect to."
   :type '(choice (const :tag "Auto" nil)
@@ -181,10 +189,22 @@ Any suggestions beyond this count will be ignored."
 (defvar url-request-method)
 (defvar url-request-extra-headers)
 (defvar url-request-data)
+(declare-function texmathp "texmathp")
 
 ;;
 ;; (@* "Core" )
 ;;
+
+(defun flycheck-languagetool--tex-math-p (pos)
+  "Return non-nil when POS is inside a TeX math environment."
+  (and flycheck-languagetool-ignore-tex-math
+       (or (eq major-mode 'latex-mode)
+           (derived-mode-p 'TeX-mode))
+       (or (fboundp 'texmathp)
+           (require 'texmathp nil t))
+       (save-excursion
+         (goto-char pos)
+         (texmathp))))
 
 (defun flycheck-languagetool--check-all (results tick)
   "Map RESULTS from LanguageTool to positions of errors in the buffer.
@@ -232,11 +252,12 @@ TICK was the result of `buffer-chars-modified-tick' at the time of the check."
                                flycheck-languagetool-suggestion-limit)
                             "…"
                           "."))))))
-        (push (list pt-beg type desc
-                    :end-pos pt-end
-                    :id (cons id subid)
-                    :fix fix)
-              check-list)))
+        (unless (flycheck-languagetool--tex-math-p pt-beg)
+          (push (list pt-beg type desc
+                      :end-pos pt-end
+                      :id (cons id subid)
+                      :fix fix)
+                check-list))))
     check-list))
 
 (defun flycheck-languagetool--read-results (status source-buffer tick callback)
