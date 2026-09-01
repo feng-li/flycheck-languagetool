@@ -58,6 +58,16 @@ matches inside or spanning masked math are also discarded."
   :type 'boolean
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-ignore-tex-preamble t
+  "Whether to ignore the preamble of a complete TeX document.
+
+When an uncommented `\\begin{document}' is present, the text through that
+command is replaced with whitespace before it is sent to LanguageTool.  Source
+positions and newlines are preserved.  Buffers without that command, such as
+included chapter files, are left unchanged."
+  :type 'boolean
+  :group 'flycheck-languagetool)
+
 (defcustom flycheck-languagetool-check-on-save-only nil
   "Whether to disable idle-change checks in LanguageTool modes.
 
@@ -225,13 +235,37 @@ Any suggestions beyond this count will be ignored."
       (and (listp face)
            (memq 'font-latex-math-face face))))
 
+(defun flycheck-languagetool--tex-preamble-end ()
+  "Return the end of the current buffer's TeX preamble, or nil."
+  (when (and flycheck-languagetool-ignore-tex-preamble
+             (flycheck-languagetool--tex-mode-p))
+    (save-excursion
+      (goto-char (point-min))
+      (let (end)
+        (while (and (not end)
+                    (re-search-forward "\\\\begin\\s-*{document}" nil t))
+          (unless (save-excursion
+                    (nth 4 (syntax-ppss (match-beginning 0))))
+            (setq end (point))))
+        end))))
+
 (defun flycheck-languagetool--buffer-text ()
   "Return buffer text suitable for checking with LanguageTool.
+
+When `flycheck-languagetool-ignore-tex-preamble' is non-nil, replace a complete
+document's TeX preamble with spaces.  Buffers without `\\begin{document}' are
+not affected.
 
 When `flycheck-languagetool-ignore-tex-math' is non-nil, replace characters
 fontified as TeX math with spaces.  Preserve newlines and string length so
 LanguageTool offsets continue to refer to the original buffer positions."
   (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+    (let ((preamble-end (flycheck-languagetool--tex-preamble-end)))
+      (when preamble-end
+        (cl-loop for buffer-pos from (point-min) below preamble-end
+                 for string-pos from 0
+                 unless (eq (char-after buffer-pos) ?\n)
+                 do (aset text string-pos ?\s))))
     (when (and flycheck-languagetool-ignore-tex-math
                (flycheck-languagetool--tex-mode-p))
       (font-lock-ensure (point-min) (point-max))
@@ -278,6 +312,7 @@ LanguageTool offsets continue to refer to the original buffer positions."
   "Map RESULTS from LanguageTool to positions of errors in the buffer.
 TICK was the result of `buffer-chars-modified-tick' at the time of the check."
   (let ((matches (cdr (assoc 'matches results)))
+        (preamble-end (flycheck-languagetool--tex-preamble-end))
         check-list)
     (dolist (match matches)
       (let* ((pt-beg (+ (point-min) (cdr (assoc 'offset match))))
@@ -320,7 +355,8 @@ TICK was the result of `buffer-chars-modified-tick' at the time of the check."
                                flycheck-languagetool-suggestion-limit)
                             "…"
                           "."))))))
-        (unless (or (flycheck-languagetool--tex-math-p pt-beg)
+        (unless (or (and preamble-end (< pt-beg preamble-end))
+                    (flycheck-languagetool--tex-math-p pt-beg)
                     (flycheck-languagetool--tex-math-range-p pt-beg pt-end))
           (push (list pt-beg type desc
                       :end-pos pt-end
