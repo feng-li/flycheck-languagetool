@@ -76,6 +76,14 @@ for prose checking.  Source positions and newlines are preserved."
   :type 'boolean
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-ignore-tex-whitespace t
+  "Whether to ignore LanguageTool whitespace rules in TeX buffers.
+
+When non-nil, matches whose rule ID contains `WHITESPACE' are discarded in
+TeX modes.  Other typographical checks and non-TeX buffers are unaffected."
+  :type 'boolean
+  :group 'flycheck-languagetool)
+
 (defcustom flycheck-languagetool-check-on-save-only nil
   "Whether to disable idle-change checks in LanguageTool modes.
 
@@ -388,6 +396,13 @@ LanguageTool offsets continue to refer to the original buffer positions."
                        flycheck-languagetool--issue-type-levels)))
       'warning))
 
+(defun flycheck-languagetool--tex-whitespace-rule-p (id)
+  "Return non-nil when ID is a whitespace rule ignored in TeX."
+  (and flycheck-languagetool-ignore-tex-whitespace
+       (flycheck-languagetool--tex-mode-p)
+       (stringp id)
+       (string-match-p "WHITESPACE" (upcase id))))
+
 (defun flycheck-languagetool--check-all (results tick)
   "Map RESULTS from LanguageTool to positions of errors in the buffer.
 TICK was the result of `buffer-chars-modified-tick' at the time of the check."
@@ -435,7 +450,8 @@ TICK was the result of `buffer-chars-modified-tick' at the time of the check."
                                flycheck-languagetool-suggestion-limit)
                             "…"
                           "."))))))
-        (unless (or (and preamble-end (< pt-beg preamble-end))
+        (unless (or (flycheck-languagetool--tex-whitespace-rule-p id)
+                    (and preamble-end (< pt-beg preamble-end))
                     (flycheck-languagetool--tex-math-p pt-beg)
                     (flycheck-languagetool--tex-math-range-p pt-beg pt-end)
                     (flycheck-languagetool--tex-command-range-p pt-beg pt-end))
