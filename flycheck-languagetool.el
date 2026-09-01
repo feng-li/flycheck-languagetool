@@ -58,6 +58,16 @@ matches inside math are also discarded."
   :type 'boolean
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-check-on-save-only nil
+  "Whether to disable idle-change checks in LanguageTool modes.
+
+When non-nil, buffers listed in `flycheck-languagetool-active-modes' run
+Flycheck when the mode is enabled and when the buffer is saved.  Because
+Flycheck's automatic check schedule is buffer-local rather than checker-local,
+this also changes the schedule of other Flycheck checkers in those buffers."
+  :type 'boolean
+  :group 'flycheck-languagetool)
+
 (defcustom flycheck-languagetool-url nil
   "The URL for the LanguageTool API we should connect to."
   :type '(choice (const :tag "Auto" nil)
@@ -201,6 +211,13 @@ Any suggestions beyond this count will be ignored."
   "Return non-nil when the current buffer uses a TeX mode."
   (or (eq major-mode 'latex-mode)
       (derived-mode-p 'TeX-mode)))
+
+(defun flycheck-languagetool--configure-automatic-checking ()
+  "Configure automatic Flycheck timing for a LanguageTool buffer."
+  (when (and flycheck-languagetool-check-on-save-only
+             (memq major-mode flycheck-languagetool-active-modes))
+    (setq-local flycheck-check-syntax-automatically
+                '(save mode-enabled))))
 
 (defun flycheck-languagetool--math-face-p (face)
   "Return non-nil when FACE includes `font-latex-math-face'."
@@ -478,8 +495,10 @@ CALLBACK is passed from Flycheck."
 
 ;;;###autoload
 (defun flycheck-languagetool-setup ()
-  "Setup flycheck-package."
+  "Register LanguageTool with Flycheck and install its buffer setup hook."
   (interactive)
+  (add-hook 'flycheck-mode-hook
+            #'flycheck-languagetool--configure-automatic-checking)
   (add-to-list 'flycheck-checkers 'languagetool))
 
 (provide 'flycheck-languagetool)
