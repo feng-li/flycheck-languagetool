@@ -52,7 +52,9 @@
   "Whether to ignore LanguageTool matches inside TeX math environments.
 
 This applies in `latex-mode' and modes derived from AUCTeX's `TeX-mode' when
-the `texmathp' library is available."
+the `texmathp' library is available.  Math is replaced with whitespace before
+it is sent to LanguageTool, preserving source positions, and any returned
+matches inside math are also discarded."
   :type 'boolean
   :group 'flycheck-languagetool)
 
@@ -195,11 +197,44 @@ Any suggestions beyond this count will be ignored."
 ;; (@* "Core" )
 ;;
 
+(defun flycheck-languagetool--tex-mode-p ()
+  "Return non-nil when the current buffer uses a TeX mode."
+  (or (eq major-mode 'latex-mode)
+      (derived-mode-p 'TeX-mode)))
+
+(defun flycheck-languagetool--math-face-p (face)
+  "Return non-nil when FACE includes `font-latex-math-face'."
+  (or (eq face 'font-latex-math-face)
+      (and (listp face)
+           (memq 'font-latex-math-face face))))
+
+(defun flycheck-languagetool--buffer-text ()
+  "Return buffer text suitable for checking with LanguageTool.
+
+When `flycheck-languagetool-ignore-tex-math' is non-nil, replace characters
+fontified as TeX math with spaces.  Preserve newlines and string length so
+LanguageTool offsets continue to refer to the original buffer positions."
+  (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+    (when (and flycheck-languagetool-ignore-tex-math
+               (flycheck-languagetool--tex-mode-p))
+      (font-lock-ensure (point-min) (point-max))
+      (let ((pos (point-min))
+            (limit (point-max)))
+        (while (< pos limit)
+          (let ((next (next-single-property-change pos 'face nil limit)))
+            (when (flycheck-languagetool--math-face-p
+                   (get-text-property pos 'face))
+              (cl-loop for buffer-pos from pos below next
+                       for string-pos from (- pos (point-min))
+                       unless (eq (char-after buffer-pos) ?\n)
+                       do (aset text string-pos ?\s)))
+            (setq pos next)))))
+    text))
+
 (defun flycheck-languagetool--tex-math-p (pos)
   "Return non-nil when POS is inside a TeX math environment."
   (and flycheck-languagetool-ignore-tex-math
-       (or (eq major-mode 'latex-mode)
-           (derived-mode-p 'TeX-mode))
+       (flycheck-languagetool--tex-mode-p)
        (or (fboundp 'texmathp)
            (require 'texmathp nil t))
        (save-excursion
@@ -343,8 +378,7 @@ CALLBACK is passed from Flycheck."
                      (url-hexify-string (cdr param))))
            (append other-params
                    `(("language" . ,flycheck-languagetool-language)
-                     ("text" . ,(buffer-substring-no-properties
-                                 (point-min) (point-max))))
+                     ("text" . ,(flycheck-languagetool--buffer-text)))
                    (when disabled-rules
                      (list (cons "disabledRules"
                                  (string-join disabled-rules ",")))))
