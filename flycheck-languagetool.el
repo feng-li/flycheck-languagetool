@@ -68,6 +68,14 @@ included chapter files, are left unchanged."
   :type 'boolean
   :group 'flycheck-languagetool)
 
+(defcustom flycheck-languagetool-ignore-tex-commands t
+  "Whether to ignore TeX command tokens such as `\\section' and `\\%'.
+
+Only the command token is replaced with whitespace; arguments remain available
+for prose checking.  Source positions and newlines are preserved."
+  :type 'boolean
+  :group 'flycheck-languagetool)
+
 (defcustom flycheck-languagetool-check-on-save-only nil
   "Whether to disable idle-change checks in LanguageTool modes.
 
@@ -235,6 +243,10 @@ Any suggestions beyond this count will be ignored."
       (and (listp face)
            (memq 'font-latex-math-face face))))
 
+(defconst flycheck-languagetool--tex-command-regexp
+  "\\\\\\(?:[[:alpha:]@]+\\*?\\|[^[:alpha:]@\n]\\)"
+  "Regular expression matching a TeX control word or control symbol.")
+
 (defun flycheck-languagetool--tex-preamble-end ()
   "Return the end of the current buffer's TeX preamble, or nil."
   (when (and flycheck-languagetool-ignore-tex-preamble
@@ -256,6 +268,9 @@ When `flycheck-languagetool-ignore-tex-preamble' is non-nil, replace a complete
 document's TeX preamble with spaces.  Buffers without `\\begin{document}' are
 not affected.
 
+When `flycheck-languagetool-ignore-tex-commands' is non-nil, replace TeX command
+tokens with spaces while retaining their arguments.
+
 When `flycheck-languagetool-ignore-tex-math' is non-nil, replace characters
 fontified as TeX math with spaces.  Preserve newlines and string length so
 LanguageTool offsets continue to refer to the original buffer positions."
@@ -266,6 +281,16 @@ LanguageTool offsets continue to refer to the original buffer positions."
                  for string-pos from 0
                  unless (eq (char-after buffer-pos) ?\n)
                  do (aset text string-pos ?\s))))
+    (when (and flycheck-languagetool-ignore-tex-commands
+               (flycheck-languagetool--tex-mode-p))
+      (save-excursion
+        (goto-char (point-min))
+        (while (re-search-forward
+                flycheck-languagetool--tex-command-regexp nil t)
+          (cl-loop for buffer-pos from (match-beginning 0) below (match-end 0)
+                   for string-pos from (- (match-beginning 0) (point-min))
+                   unless (eq (char-after buffer-pos) ?\n)
+                   do (aset text string-pos ?\s)))))
     (when (and flycheck-languagetool-ignore-tex-math
                (flycheck-languagetool--tex-mode-p))
       (font-lock-ensure (point-min) (point-max))
@@ -307,6 +332,25 @@ LanguageTool offsets continue to refer to the original buffer positions."
                  (get-text-property pos 'face))
                 pos (next-single-property-change pos 'face nil limit))))
       found)))
+
+(defun flycheck-languagetool--tex-command-range-p (beg end)
+  "Return non-nil when the range from BEG to END overlaps a TeX command."
+  (when (and flycheck-languagetool-ignore-tex-commands
+             (flycheck-languagetool--tex-mode-p))
+    (save-excursion
+      (goto-char (max beg (point-min)))
+      (goto-char (line-beginning-position))
+      (let ((limit (save-excursion
+                     (goto-char (min end (point-max)))
+                     (line-end-position)))
+            found)
+        (while (and (not found)
+                    (re-search-forward
+                     flycheck-languagetool--tex-command-regexp limit t))
+          (setq found
+                (and (< (match-beginning 0) end)
+                     (> (match-end 0) beg))))
+        found))))
 
 (defun flycheck-languagetool--check-all (results tick)
   "Map RESULTS from LanguageTool to positions of errors in the buffer.
@@ -357,7 +401,8 @@ TICK was the result of `buffer-chars-modified-tick' at the time of the check."
                           "."))))))
         (unless (or (and preamble-end (< pt-beg preamble-end))
                     (flycheck-languagetool--tex-math-p pt-beg)
-                    (flycheck-languagetool--tex-math-range-p pt-beg pt-end))
+                    (flycheck-languagetool--tex-math-range-p pt-beg pt-end)
+                    (flycheck-languagetool--tex-command-range-p pt-beg pt-end))
           (push (list pt-beg type desc
                       :end-pos pt-end
                       :id (cons id subid)
