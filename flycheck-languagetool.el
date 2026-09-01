@@ -54,7 +54,7 @@
 This applies in `latex-mode' and modes derived from AUCTeX's `TeX-mode' when
 the `texmathp' library is available.  Math is replaced with whitespace before
 it is sent to LanguageTool, preserving source positions, and any returned
-matches inside math are also discarded."
+matches inside or spanning masked math are also discarded."
   :type 'boolean
   :group 'flycheck-languagetool)
 
@@ -258,6 +258,22 @@ LanguageTool offsets continue to refer to the original buffer positions."
          (goto-char pos)
          (texmathp))))
 
+(defun flycheck-languagetool--tex-math-range-p (beg end)
+  "Return non-nil when the range from BEG to END contains masked TeX math."
+  (when (and flycheck-languagetool-ignore-tex-math
+             (flycheck-languagetool--tex-mode-p))
+    (let ((pos (max beg (point-min)))
+          (limit (min end (point-max)))
+          found)
+      (when (< pos limit)
+        (font-lock-ensure pos limit)
+        (while (and (< pos limit) (not found))
+          (setq found
+                (flycheck-languagetool--math-face-p
+                 (get-text-property pos 'face))
+                pos (next-single-property-change pos 'face nil limit))))
+      found)))
+
 (defun flycheck-languagetool--check-all (results tick)
   "Map RESULTS from LanguageTool to positions of errors in the buffer.
 TICK was the result of `buffer-chars-modified-tick' at the time of the check."
@@ -304,7 +320,8 @@ TICK was the result of `buffer-chars-modified-tick' at the time of the check."
                                flycheck-languagetool-suggestion-limit)
                             "…"
                           "."))))))
-        (unless (flycheck-languagetool--tex-math-p pt-beg)
+        (unless (or (flycheck-languagetool--tex-math-p pt-beg)
+                    (flycheck-languagetool--tex-math-range-p pt-beg pt-end))
           (push (list pt-beg type desc
                       :end-pos pt-end
                       :id (cons id subid)
